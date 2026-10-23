@@ -1,0 +1,52 @@
+[project]
+name = "did-with-deb"
+version = "0.1.0"
+description = "Code for 'Deep Incentive Design with Differentiable Equilibrium Blocks' by V. Thoma et al."
+readme = "README.md"
+requires-python = ">=3.14"
+
+dependencies = [
+    "chex>=0.1.92",
+    "jax>=0.10.1",
+    "flax>=0.12.7",
+    "optax>=0.2.8",
+    "pandas",
+    "numpy",
+    "scipy",
+    "cvxpy",
+    "ecos", #solver
+    "absl-py",
+    "matplotlib>=3.11.0",
+    "trackio",
+    "open-spiel",
+    "ruff>=0.17.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["nes*", "did*"]
+
+[tool.ruff]
+# Target Python version
+target-version = "py314"
+
+# Same as Black's default line length
+line-length = 90
+indent-width = 2
+
+[tool.ruff.lint]
+# Enable specific rule categories (E: Error, F: Pyflakes, I: isort, W: Warning)
+select = ["E", "F", "I", "W"]
+
+# Rules to explicitly ignore
+ignore = ["W291", "W293"]
+
+# Automatically fix fixable violations
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.isort]
+# Ensure imports are automatically grouped and sorted properly
+combine-as-imports = true
+
+[tool.ruff.format]
+indent-style = "space"
