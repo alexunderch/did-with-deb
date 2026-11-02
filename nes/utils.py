@@ -571,4 +571,6 @@ class AsyncExactSolver:
       "solver_gap": _maybe_stack("solver_gap"),
       "welfare_gap": _maybe_stack("welfare_gap"),
       "eps_gap": _maybe_stack("eps_gap"),
+      "ineq_violation": _maybe_stack("ineq_violation")
     }
+

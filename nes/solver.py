@@ -108,7 +108,6 @@ class DifferentiableEquilibriumBlock(nn.Module):
     epsilon_max: float,
     mode: networks.Mode,
   ) -> DifferentiableEquilibriumBlock:
-    
     _network = networks.NeuralEquilibriumModel(
       num_players=num_players,
       dual_channels=network_config["dual_channels"],
@@ -184,7 +183,6 @@ class NESolver:
     self._mu = welfare_coeff
     self._rho = entropy_coeff
     self._norm = norm
-
 
     if game in pyspiel.registered_names():
       _game = pyspiel.load_game(game)
@@ -276,7 +274,7 @@ class NESolver:
       dual_channel_list=network_config["dual_channel_list"],
       rngs=nn.Rngs(seed),
     )
-  
+
     def mask_fn(params):
       # Not applying decay to biases and batchnorm params. See:
       # https://discuss.pytorch.org/t/weight-decay-in-the-optimizers-is-a-bad-idea-especially-with-batchnorm/16994
@@ -482,9 +480,19 @@ class NESolver:
       nn.update(self._network, state_restored)
     self._checkpointer.wait_until_finished()
 
-  def _logging_callback(self, batch: Data, primals: dict) -> dict:
+  def _logging_callback(
+    self,
+    batch: Data,
+    primals: dict,
+    mode: networks.Mode | None = None,
+    welfare_coeff: float | None = None,
+    entropy_coeff: float | None = None,
+    eps_cap: float | None = None,
+  ) -> dict:
+
+    mode  = mode if mode is not None else self._mode
     # Fast JAX-computed gap (always available immediately)
-    if self._mode == networks.Mode.CCE:
+    if mode == networks.Mode.CCE:
       regret = jax.vmap(eu.compute_cce_gap)(
         batch.payoffs,
         primals["strategy"],
@@ -507,10 +515,10 @@ class NESolver:
       primals["strategy"],
       batch.epsilon_target,
       batch.strat_mask_per_player,
-      self._mu,
-      self._rho,
-      self._eps_cap,
-      self._mode.name,
+      self._mu if welfare_coeff is None else welfare_coeff,
+      self._rho if entropy_coeff is None else entropy_coeff,
+      self._eps_cap if eps_cap is None else eps_cap,
+      mode.name,
     )
 
     # Block here only for logging (still much faster than sequential)
@@ -525,11 +533,17 @@ class NESolver:
     step: int,
     batch_size: int,
     sampler: samplers.GameSampler | None = None,
+    mode: networks.Mode | None = None,
+    welfare_coeff: float | None = None,
+    entropy_coeff: float = None,
+    eps_max: float = None,
   ) -> dict:
     sampler = sampler if sampler is not None else self._sampler
     batch = sampler.sample_random(batch_size, jax.random.key(step), None)
     loss, (primals, _) = self._infer_fn(nn.state(self._network), batch)
-    log = self._logging_callback(batch, primals)
+    log = self._logging_callback(
+      batch, primals, mode, welfare_coeff, entropy_coeff, eps_max
+    )
     log["eval_loss"] = loss
     for k, v in log.items():
       print(f"\t{k}:\t{v}")
@@ -543,20 +557,18 @@ class NESolver:
     batch_size: int | None = None,
     eval_batch_size: int | None = None,
     logging_path: etils.epath.Path | str | None = None,
+    run_name: str | None = None,
   ):
     num_steps = self._network_train_steps if num_steps is None else num_steps
     batch_size = self._batch_size if batch_size is None else batch_size
     eval_batch_size = (
       self._eval_batch_size if eval_batch_size is None else eval_batch_size
     )
-    """
-    Executes the optimization loop to find the equilibrium.
-    Returns the optimal dual variables and the recovered primal policy.
+    """Executes the optimisation loop to find the equilibrium.
+      Returns the optimal dual variables and the recovered primal policy.
     """
     # Logger setup
-    trackio.init(
-      project="NES",
-    )
+    trackio.init(project="NES", name=run_name)
     logger = None
     if logging_path is not None:
       logger = data_logger.DataLoggerJsonLines(logging_path, "NES_learner", True)

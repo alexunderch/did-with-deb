@@ -20,13 +20,13 @@ class DEB:
     solver_network: networks.NeuralEquilibriumModel | None = None,
     *,
     num_players: int,
-    dual_channels: int,
     mode: networks.Mode,
     payoff_channel_list: list[int],
     dual_channel_list: list[int],
     welfare_coeff: float = 0.0,
     entropy_coeff: float,
     epsilon_max: float,
+    dual_channels: int  | None = None,
     epsilon: float = 0.01,
     objective: samplers.Objective | None = samplers.Objective.EPS_MWMRE,
     norm: int = 2,
@@ -58,10 +58,12 @@ class DEB:
     self._rngkey = jax.random.key(seed)
 
     if solver_network is not None:
-      self._network = solver_network
+      graphdef, state = nn.split(solver_network)
+      self._network = nn.merge(graphdef, state)
       self._network.eval()  # freeze BatchNorm running stats
 
     elif checkpoint_dir is not None:
+      assert dual_channels is not None
 
       self._network = networks.NeuralEquilibriumModel(
         num_players=num_players,
@@ -79,6 +81,7 @@ class DEB:
       )
       nn.update(self._network, state_restored)
       checkpointer.wait_until_finished()
+
 
     self._graphdef = nn.graphdef(self._network)
     self._state = nn.state(self._network)
@@ -130,7 +133,7 @@ class DEB:
       z_m.reshape(-1),
     )
 
-  def _intialise_strategy(
+  def _initialise_strategy(
     self, joint_mask: chex.Array, rng: chex.PRNGKey
   ) -> tuple[chex.Array, chex.Array]:
     """Uniform sigma_hat over the valid joint actions and its scaled version
@@ -143,7 +146,8 @@ class DEB:
     strategy_base = jnp.where(joint_mask, 1.0 / count_b, 0.0)
 
     if self._obj in [samplers.Objective.MRE, samplers.Objective.EPS_MRE]:
-      strategy_base = jnp.where(joint_mask, jax.random.gamma(rng, 1.0), 0.0)
+      g = jnp.where(joint_mask, jax.random.gamma(rng, 1.0, shape=joint_mask.shape), 0.0)
+      strategy_base = g / jnp.sum(g)
 
     z_sigma = count_b * jnp.sqrt(
       (count_b + 1.0) / (count_b - 1.0 + utils.SMALL_NUMBER)
@@ -184,7 +188,6 @@ class DEB:
         the mechanism generator); this function applies the same
         normalisation the DEB was trained under. Entries on invalid joint
         actions are ignored.
-      rng: chex.PRNGKey: random key
       strat_mask_per_player: per-player masks, each [B, Ap].
       joint_mask: optional [B, A1, ..., AN]; derived from
         strat_mask_per_player if omitted.
@@ -203,7 +206,7 @@ class DEB:
 
     def _initialise_single(payoff, strat_mask_per_player, joint_mask, rng):
       payoffs_norm, scale, z_m = self._normalise_payoffs(payoff, joint_mask)
-      strategy_base, strategy_norm = self._intialise_strategy(joint_mask, rng)
+      strategy_base, strategy_norm = self._initialise_strategy(joint_mask, rng)
 
       # target slack
       epsilon_target = jnp.minimum(_epsilon * scale, z_m)
@@ -223,6 +226,7 @@ class DEB:
       payoffs,
       strat_mask_per_player,
       joint_mask,
+      # WONKY
       jax.random.split(jax.random.key(joint_mask.sum().astype(int)), batch_size),
     )
 

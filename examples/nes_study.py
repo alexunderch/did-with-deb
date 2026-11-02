@@ -34,21 +34,21 @@ Experiments follow the reproduction plan:
   6. 2x2 canonical games
 """
 
-# | # | Test                                 | What It Proves                                   |
-# | - | ------------------------------------ | ------------------------------------------------ |
-# | 1 | Training convergence on `8×8`        | The unsupervised loss works                      |
-# | 2 | In-distribution accuracy (`8×8`)     | NES matches iterative solvers                    |
-# | 3 | Zero-shot on `4×4`, `16×16`, `32×32` | Shape-independent generalization                 |
-# | 4 | MWME vs. MRE vs. ε variants          | Flexible selection framework                     |
-# | 5 | CCE vs. CE duals                     | Both solution concepts are learnable             |
-# | 6 | 2×2 canonical games                  | Qualitative correctness & polytope visualization |
+# | # | Test                                | What It Proves                         |
+# | - | ------------------------------------| ---------------------------------------|
+# | 1 | Training convergence on `8×8`       | The unsupervised loss works            |
+# | 2 | In-distribution accuracy (`8×8`)    | NES matches iterative solvers          |
+# | 3 | Zero-shot on `4×4`, `16×16`, `32×32`| Shape-independent generalization       |
+# | 4 | MWME vs. MRE vs. ε variants         | Flexible selection framework           |
+# | 5 | CCE vs. CE duals                    | Both solution concepts are learnable   |
+# | 6 | 2×2 canonical games                 | Qualitative correctness & polytope vis.|
 
 
 FLAGS = flags.FLAGS
 
 # Training
-flags.DEFINE_integer("train_steps", 10000, "Training steps for convergence.")
-flags.DEFINE_integer("log_every", 500, "Log/eval frequency.")
+flags.DEFINE_integer("train_steps", 25000, "Training steps for convergence.")
+flags.DEFINE_integer("log_every", 2500, "Log/eval frequency.")
 flags.DEFINE_integer("batch_size", 32, "Batch size.")
 flags.DEFINE_integer("eval_batch_size", 64, "Eval batch size.")
 flags.DEFINE_integer("seed", 42, "Global seed.")
@@ -157,7 +157,7 @@ def experiment_1_convergence() -> dict[str, Any]:
     train_steps=FLAGS.train_steps,
   )
 
-  logs = solver.solve()
+  logs = solver.solve(run_name="convergence")
 
   # Extract metrics
   losses = [float(log["eval_loss"]) for log in logs if "eval_loss" in log]
@@ -182,6 +182,8 @@ def experiment_2_indistribution() -> dict[str, Any]:
     num_strategies=(8, 8),
     train_steps=FLAGS.train_steps,
   )
+
+  solver.solve()
 
   # Evaluate on fresh held-out batch
   eval_sampler = samplers.RandomGameSampler(

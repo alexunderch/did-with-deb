@@ -32,12 +32,16 @@ As the repository is written in `JAX`, you can use power of its device agnostici
 
 ## Testing
 
-> [!NOTE]
-> This section is the most up to redesign. Current version uses `abseil`'s legacy which is hard to automate 
-> without bash scripts or `Bazel`.
+To run all tests,
 
 ```Bash
-bash run_tests.sh
+pytest
+```
+
+Also works with the project specification,
+
+```Bash
+pytest ./nes # ./did
 ```
 
 ## Contents

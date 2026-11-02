@@ -292,6 +292,7 @@ class MechanismGeneratorDesigner:
     eval_every: int | None = None,
     eval_batch_size: int | None = None,
     logging_path: etils.epath.Path | str | None = None,
+    run_name: str | None = None
   ):
     num_steps = self._network_train_steps if num_steps is None else num_steps
     batch_size = self._batch_size if batch_size is None else batch_size
@@ -303,6 +304,7 @@ class MechanismGeneratorDesigner:
 
     trackio.init(
       project="DID",
+      name=run_name
     )
     logger = None
     if logging_path is not None:
@@ -343,7 +345,7 @@ class MechanismGeneratorDesigner:
     trackio.finish()
     return history
 
-  def build_eval_items(
+  def _build_eval_items(
     self, ctx: samplers.Context, out: chex.Array, epsilon: float = 0.01
   ) -> list[eu.EvalData]:
     payoffs = self._task.induced_game(ctx, out)
@@ -386,7 +388,7 @@ class MechanismGeneratorDesigner:
   ) -> dict:
     ctx = self._task.sampler.sample_random(batch_size, jax.random.key(10_000 + step))
     out = self._task.generate(self._generator, ctx)
-    items = self.build_eval_items(ctx, out)
+    items = self._build_eval_items(ctx, out)
 
     futures = self._evaluator.submit_batch(
       items,

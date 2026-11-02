@@ -699,6 +699,41 @@ def _build_ce_gains(
 
   return gains
 
+def _build_ineq_matrices(
+  payoffs: chex.Array,
+  valid_idx: chex.Array,
+  strat_mask_per_player: list[chex.Array],
+  mode: str,
+) -> list[tuple[int, np.ndarray]]:
+  """(player, matrix) pairs such that the eps-(C)CE set is {sigma: M_p @ sigma <= eps_p}.
++
+  CCE: M_p = _build_cce_gains(...)[p], one row per valid deviation.
+  CE: one row per (dev != rec) pair, with the columns of joint actions whose
+  own action is not `rec` zeroed (a CE gain is only paid when a_p = rec).
+  """
+  if mode not in ("CE", "CCE"):
+    raise ValueError(f"mode must be 'CE' or 'CCE', got {mode!r}")
+  payoffs = np.asarray(payoffs)
+  if mode == "CCE":
+    return list(enumerate(_build_cce_gains(payoffs, valid_idx, strat_mask_per_player)))
+
+  _, *action_shape = payoffs.shape
+  valid_actions_per_player = [np.where(np.asarray(m))[0] for m in strat_mask_per_player]
+  # [n_valid, N]: real action of every player in every valid joint action
+  grid = np.stack(np.unravel_index(valid_idx, action_shape), axis=-1)
+  mats = []
+  gains = _build_ce_gains(payoffs, valid_idx, strat_mask_per_player)
+  for p, gain_p in enumerate(gains):
+    n_p = gain_p.shape[0]
+    rows = [
+      gain_p[dev, rec, :] * (grid[:, p] == valid_actions_per_player[p][rec])
+      for dev in range(n_p)
+      for rec in range(n_p)
+      if dev != rec  # diagonal is identically zero
+    ]
+    if rows:
+      mats.append((p, np.stack(rows, axis=0)))
+  return mats
 
 def mwmre_solver(
   payoffs: chex.Array,
@@ -711,6 +746,9 @@ def mwmre_solver(
   epsilon_max: float | chex.Array = None,
   mode: str = "CE",
   verbose: bool = False,
+  strategy_base: chex.Array | None = None,
+  abstol: float = 1e-3,
+  reltol: float = 1e-3,
 ) -> dict:
   """Solve exact ε-MWMRE CE or CCE via convex optimisation.
 
@@ -726,7 +764,8 @@ def mwmre_solver(
   Args:
     payoffs: Player payoffs with shape [N, A1, ..., AN].
     welfare: Player welfare with shape [N, A1, ..., AN].
-    strat_pred: Joint strategy with shape [A1, ..., AN].
+    strat_pred: strat_pred: Joint strategy with shape [A1, ..., AN]: 
+      the NETWORK's prediction, used only to report gaps against.
     epsilon_target: Per-player slack with shape [N].
     strat_mask_per_player: Per-player valid action masks.
     welfare_coeff: Objective scalar coefficient
@@ -734,9 +773,16 @@ def mwmre_solver(
     epsilon_max: Objective scalar coefficient
     mode: str: CCE or CE
     verbose: Where to verbose the `cvxpy` solver
+    strategy_base: The KL target sigma-hat [A1, ..., AN] (data.strategy_base).
+      Defaults to `strat_pred` for backward compatibility, but that is only
+      right if the prediction IS the target: with it, the KL term is
+      minimised by returning the prediction itself whenever it is feasible.
+    abstol, reltol: ECOS tolerances.
 
   Returns:
-    report: A dict with scalar solver metrics and gaps.
+    report: A dict with scalar solver metrics and gaps. On failure it has
+      the same keys (NaN / None) plus an "error" message, so callers can
+      index it unconditionally.
 
   NOTE: call fail on large (compared to the RAM size) games.
   """
@@ -746,14 +792,13 @@ def mwmre_solver(
   joint_size = utils.compute_joint_action_size(A)
 
   payoffs_flat = np.asarray(payoffs).reshape((N, joint_size))
-  target_flat = np.asarray(strat_pred).flatten()
+  kl_target = strat_pred if strategy_base is None else strategy_base
+  target_flat = np.asarray(kl_target).flatten()
 
   joint_mask = utils.make_joint_mask_from_strat_masks(strat_mask_per_player)
   mask_flat = np.asarray(joint_mask).flatten()
   valid_idx = np.where(mask_flat)[0]
   n_valid = len(valid_idx)
-
-  valid_actions_per_player = [np.where(m)[0] for m in strat_mask_per_player]
 
   # Ensure eps_hat doesn't exceed eps_plus (avoids log(negative))
   epsilon_target = np.minimum(epsilon_target, epsilon_max - utils.SMALL_NUMBER)
@@ -772,36 +817,11 @@ def mwmre_solver(
     constraints.append(epsilon[p] <= epsilon_max)
     constraints.append(epsilon[p] >= -epsilon_max)
 
-  # --- Equilibrium constraints ---
-  if mode == "CCE":
-    gains = _build_cce_gains(
-      np.asarray(payoffs), valid_idx, strat_mask_per_player
-    )
-    for p, gain_p in enumerate(gains):
-      # gain_p shape: (n_valid_p, n_valid)
-      constraints.append(gain_p @ strategy <= epsilon[p])
-  else:
-    gains = _build_ce_gains(
-      np.asarray(payoffs), valid_idx, strat_mask_per_player
-    )
-    for p, gain_p in enumerate(gains):
-      for dev in range(gain_p.shape[0]):
-        for rec in range(gain_p.shape[1]):
-          if dev == rec:
-            # same real action (dev/rec share the same filtered order)
-            continue 
-
-          coeffs = gain_p[dev, rec, :].copy()
-
-          # back to the real action id before comparing against a[p] below.
-          rec_action = valid_actions_per_player[p][rec]
-
-          for i, flat_idx in enumerate(valid_idx):
-            a = np.unravel_index(flat_idx, A)
-            if a[p] != rec_action:
-              coeffs[i] = 0.0
-
-          constraints.append(coeffs @ strategy <= epsilon[p])
+  ineq_mats = _build_ineq_matrices(
+    np.asarray(payoffs), valid_idx, strat_mask_per_player, mode
+  )
+  for p, mat in ineq_mats:
+    constraints.append(mat @ strategy <= epsilon[p])
 
   if welfare is not None:
     welfare_flat = np.asarray(welfare).reshape(joint_size)[valid_idx]
@@ -838,10 +858,23 @@ def mwmre_solver(
   objective = welfare_term - kl_term + eps_term
 
   prob = cp.Problem(cp.Maximize(objective), constraints)
-  prob.solve(solver=cp.ECOS, verbose=verbose, abstol=1e-3, reltol=1e-3)
+  def _failed(status, error):
+    # Same keys as the success report, so callers can index unconditionally.
+    return {
+      "solver_gap": np.nan, "welfare_gap": np.nan, "eps_gap": np.nan,
+      "strategy_target": None, "status": status, "objective_value": np.nan,
+      "welfare": np.nan, "kl_to_hat": np.nan, "ineq_violation": np.nan,
+      "error": error,
+    }
 
+  try:
+    prob.solve(solver=cp.ECOS, verbose=verbose, abstol=abstol, reltol=reltol)
+  except cp.error.SolverError as e:
+    # ECOS can raise (not just return a bad status) on hard instances.
+    return _failed("solver_error", str(e))
+ 
   if strategy.value is None:
-    return {"stat_pred": None, "status": prob.status, "error": "Solver failed"}
+    return _failed(prob.status, "Solver failed")
 
   # Reconstruct full sigma
   strategy_target = np.zeros(joint_size)
@@ -856,7 +889,7 @@ def mwmre_solver(
       strategy_target
       * (
         np.log(strategy_target + utils.SMALL_NUMBER)
-        - np.log(strat_pred + utils.SMALL_NUMBER)
+        - np.log(np.asarray(kl_target) + utils.SMALL_NUMBER)
       )
     )
   )
@@ -864,6 +897,15 @@ def mwmre_solver(
   solver_gap = 0.5 * jnp.abs(strategy_target - strat_pred).sum()
   welfare_gap = jnp.sum((strategy_target - strat_pred) * welfare_full)
   eps_gap = jnp.max(jnp.abs(epsilon_target - epsilon.value))
+
+  # How far it is outside the eps-(C)CE set the solver was supposed to enforce.
+  ineq_violation = max(
+    [0.0]
+    + [
+      float(np.max(mat @ strategy.value - epsilon.value[p]))
+      for p, mat in ineq_mats
+    ]
+  )
 
   return {
     "solver_gap": solver_gap,
@@ -874,4 +916,5 @@ def mwmre_solver(
     "objective_value": float(prob.value),
     "welfare": actual_welfare,
     "kl_to_hat": actual_kl,
+    "ineq_violation": ineq_violation
   }

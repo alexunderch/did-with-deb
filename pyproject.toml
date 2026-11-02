@@ -1,6 +1,6 @@
 [project]
 name = "did-with-deb"
-version = "0.1.0"
+version = "0.1.1"
 description = "Code for 'Deep Incentive Design with Differentiable Equilibrium Blocks' by V. Thoma et al."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -20,6 +20,7 @@ dependencies = [
     "trackio",
     "open-spiel",
     "ruff>=0.17.2",
+    "pytest"
 ]
 
 [tool.setuptools.packages.find]
