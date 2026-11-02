@@ -9,6 +9,7 @@ sets are polytopes inside it:
 
 import itertools
 
+import etils.epath
 import numpy as np
 import scipy.optimize
 import scipy.spatial
@@ -334,14 +335,18 @@ CANONICAL_GAMES = {
 
 
 def plot_canonical_games(
-  path: str, eps: float = 0.0, points_per_game=None, **plot_kwargs
+  path: etils.epath.Path,
+  games: dict = CANONICAL_GAMES,
+  eps: float = 0.0,
+  points_per_game=None,
+  **plot_kwargs,
 ) -> None:
   """2x2 figure of the canonical games. `points_per_game`: optional
   {game name: {label: [2, 2] sigma}} to overlay solver outputs."""
   import matplotlib.pyplot as plt
 
   fig = plt.figure(figsize=(13, 12))
-  for k, (name, (g, names)) in enumerate(CANONICAL_GAMES.items()):
+  for k, (name, (g, names)) in enumerate(games.items()):
     ax = fig.add_subplot(2, 2, k + 1, projection="3d")
     plot_polytopes(
       g,

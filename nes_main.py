@@ -1,7 +1,7 @@
 import pyspiel
 from absl import app, flags, logging
 
-from nes import games, networks, solver, utils
+from nes import games, networks, samplers, solver, utils
 
 logger = logging
 FLAGS = flags.FLAGS
@@ -10,14 +10,19 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string(
   "checkpoint_dir", "/tmp/nes_test", "Directory to save/load the agent models."
 )
+
+flags.DEFINE_string("experiment_name", None, "A name for the experiment run if any.")
+
+flags.DEFINE_string("logging_dir", None, "Trackio/JSON logging directory.")
+
 flags.DEFINE_integer(
-  "save_every",
+  "eval_every",
   int(1e4),
-  "Episode frequency at which the the solver's weights are saved.",
+  "Episode frequency at which the the solver's evaluated.",
 )
 flags.DEFINE_integer("iterations", int(6e4), "Number of training episodes.")
 flags.DEFINE_integer(
-  "log_every", 5000, "Episode frequency at which the NESolver is evaluated."
+  "log_every", 5000, "Episode frequency at which the NESolver's logs are saved."
 )
 
 flags.DEFINE_list(
@@ -34,17 +39,15 @@ flags.DEFINE_integer(
   "dual_channels", 64, "Number of hidden units in the payoff-to-dual layer"
 )
 
-flags.DEFINE_multi_enum(
+flags.DEFINE_list(
   "random_games",
   [],  # default list
-  [m.name for m in games.Game],
   "Random game types to sample from. Can specify multiple times.",
 )
 
-flags.DEFINE_multi_enum(
+flags.DEFINE_list(
   "openspiel_games",
   [],  # default list
-  list(pyspiel.registered_names()),
   "OpenSpiel games to sample from. Can specify multiple times.",
 )
 
@@ -53,6 +56,13 @@ flags.DEFINE_enum(
   "CCE",
   [m.name for m in networks.Mode],
   "What equilibrium, CE or CCE do we look for?",
+)
+
+flags.DEFINE_enum(
+  "objective",
+  "EPS_MWMRE",
+  [m.name for m in samplers.Objective],
+  "What optimisation objective do we sample for?",
 )
 
 flags.DEFINE_list(
@@ -91,13 +101,32 @@ flags.DEFINE_bool("use_checkpoints", False, "Save/load neural network weights.")
 flags.DEFINE_bool("save_for_deb", False, "Save json config for using it as a DEB later.")
 
 
+@flags.validator("random_games")
+def _validate_games(values):
+  for v in values:
+    if v not in [m.name for m in games.Game]:
+      raise flags.ValidationError(
+        f"value '{v}' should be one of <{'|'.join([m.name for m in games.Game])}>"
+      )
+  return True
+
+
+@flags.validator("openspiel_games")
+def _validate_games(values):
+  for v in values:
+    if v not in list(pyspiel.registered_names()):
+      raise flags.ValidationError(
+        f"value '{v}' should be one of <{'|'.join(list(pyspiel.registered_names()))}>"
+      )
+  return True
+
+
 def main(_) -> None:
   network_config = {
     "dual_channels": FLAGS.dual_channels,
     "payoff_channel_list": FLAGS.payoff_channel_list,
     "dual_channel_list": FLAGS.dual_channel_list,
   }
-
   random_games = [games.Game[game] for game in FLAGS.random_games]
   openspiel_names = FLAGS.openspiel_games
   assert len(openspiel_names) + len(random_games) > 0, "Any games should be specified"
@@ -106,6 +135,7 @@ def main(_) -> None:
     random_games + openspiel_names,
     networks.Mode[FLAGS.mode],
     network_config,
+    objective=FLAGS.objective,
     entropy_coeff=FLAGS.entropy_coeff,
     welfare_coeff=FLAGS.welfare_coeff,
     epsilon_max=FLAGS.epsilon_max,
@@ -117,6 +147,7 @@ def main(_) -> None:
     network_train_steps=FLAGS.iterations,
     gradient_clipping=FLAGS.max_grad_norm,
     log_every=FLAGS.log_every,
+    eval_every=FLAGS.eval_every,
     seed=FLAGS.seed,
     game_kwargs={
       "num_strategies": tuple(int(_) for _ in FLAGS.num_strategies),
@@ -124,7 +155,7 @@ def main(_) -> None:
     },
     allow_checkpointing=FLAGS.use_checkpoints,
   )
-  nesolver.solve()
+  nesolver.solve(logging_path=FLAGS.logging_dir, run_name=FLAGS.experiment_name)
   nesolver.save(
     checkpoint_dir=FLAGS.checkpoint_dir,
     save_optimiser=True,

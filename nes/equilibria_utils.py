@@ -769,7 +769,7 @@ def mwmre_solver(
     epsilon_target: Per-player slack with shape [N].
     strat_mask_per_player: Per-player valid action masks.
     welfare_coeff: Objective scalar coefficient
-    ent_coeff: Objective scalar coefficient
+    entropy_coeff: Objective scalar coefficient
     epsilon_max: Objective scalar coefficient
     mode: str: CCE or CE
     verbose: Where to verbose the `cvxpy` solver
@@ -871,6 +871,7 @@ def mwmre_solver(
     prob.solve(solver=cp.ECOS, verbose=verbose, abstol=abstol, reltol=reltol)
   except cp.error.SolverError as e:
     # ECOS can raise (not just return a bad status) on hard instances.
+    print(f"Solver's failure detected: {str(e)}")
     return _failed("solver_error", str(e))
  
   if strategy.value is None:

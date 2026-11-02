@@ -26,13 +26,13 @@ The main driver file is
 >> python nes_main.py --help
 >> nes_main.py:
   --batch_size: Number of transitions to sample at each learning step.
-    (default: 64) (an integer)
+    (default: 64)(an integer)
   --checkpoint_dir: Directory to save/load the agent models.
     (default: '/tmp/nes_test')
   --decay: Weight decay of the optimiser.
-    (default: 1e-7) (a number)
+    (default: 1e-07)(a number)
   --dual_channel_list: Number of hidden units in the dual-to-dual MLP
-    (default: '32,32') (a comma separated list)
+    (default: 32,32)(a comma separated list)
   --dual_channels: Number of hidden units in the payoff-to-dual layer
     (default: 64) (an integer)
   --entropy_coeff: Minimum Relative Entropy coefficient of the loss function.
@@ -40,36 +40,39 @@ The main driver file is
   --epsilon_max: Epsilon plus coefficient of the loss function. (a number)
   --eval_batch_size: Number of transitions to sample at each evaluation step.
     (default: 10) (an integer)
+  --eval_every: Episode frequency at which the the solver`s evaluated.
+    (default: 10000) (an integer)
+  --experiment_name: A name for the experiment run if any.
   --iterations: Number of training episodes.
     (default: 60000) (an integer)
   --learning_rate: Learning rate of the solver`s updates.
     (default: 0.0001) (a number)
-  --log_every: Episode frequency at which the NESolver is evaluated.
+  --log_every: Episode frequency at which the solver`s logs are saved.
     (default: 5000) (an integer)
+  --logging_dir: Trackio/JSON logging directory.
   --max_actions: Number of maximum actions for all games. (an integer)
   --max_grad_norm: Max allowed gradient norm.
     (default: 1.0) (a number)
-  --mode: <CE|CCE>: What equilibrium, CE or CCE do we look for? (default: 'CCE')
+  --mode: <CE|CCE>: What equilibrium, CE or CCE do we look for?
+    (default: 'CCE')
   --norm: Norm of the payoff tensor.
     (default: 2) (an integer)
   --num_strategies: A tuple defining number of the players` actions (A1, ..., AN)
     (a comma separated list)
-  --openspiel_games: OpenSpiel games to sample from. Can specify multiple times.;
-    repeat this option to specify a list of values
-    (default: '[]')
+  --objective: <ME|MT|MU|MWME|MRE|MS|EPS_ME|EPS_MWME|EPS_MRE|EPS_MWMRE>: What optimisation objective do we sample for?
+    (default: 'EPS_MWMRE')
+  --openspiel_games: OpenSpiel games to sample from. Can specify multiple times.
+    (default: '') (a comma separated list)
   --payoff_channel_list: Number of hidden units in the payoff-to-payoff MLP
-    (default: '32,32,32,32,32') (a comma separated list)
-  --random_games: <EMPIRICAL_DISC_GAME|L1_INVARIANT|L2_INVARIANT|LINF_INVARIANT>: Random game
-    types to sample from. Can specify multiple times.;
-    repeat this option to specify a list of values
-    (default: '[]')
-  --save_every: Episode frequency at which the the solver`s weights are saved.
-    (default: 10000) (an integer)
-  --[no]save_for_deb: Save json config for using it as a DEB later. (default: 'false')
+    (default: 32,32,32,32,32) (a comma separated list)
+  --random_games: Random game types to sample from. Can specify multiple times.
+    (default: '') (a comma separated list)
+  --[no]save_for_deb: Save json config for using it as a DEB later.
+    (default: false)
   --seed: A random seed.
     (default: 42) (an integer)
   --[no]use_checkpoints: Save/load neural network weights.
-    (default: 'false')
+    (default: false)
   --welfare_coeff: Maximum Welfare coefficient of the loss function.
     (default: 4.0) (a number)
 ```
@@ -91,16 +94,16 @@ The network consumes a 4-channel tensor of shape `[B, 4, N, A1, ..., AN]`:
 The pipeline is following
 
 ```
-    Input: [B, 4, N, A1, ..., AN]
-        ↓
-    [1] EquivariantPayoffToPayoff × K   (maintains joint action space)
-        ↓
-    [2] PayoffsToDuals                  (marginalises to player-action space)
-        ↓
-    [3] EquivariantDualToDual × L       (refines in individual space)
-        ↓
-    [4] Final projection + Softplus     (ensures α ≥ 0)
-    Output: α — [B, 1, N, A] for CCE, [B, 1, N, A, A] for CE
+Input: [B, 4, N, A1, ..., AN]
+    ↓
+[1] EquivariantPayoffToPayoff × K   (maintains joint action space)
+    ↓
+[2] PayoffsToDuals                  (marginalises to player-action space)
+    ↓
+[3] EquivariantDualToDual × L       (refines in individual space)
+    ↓
+[4] Final projection + Softplus     (ensures α ≥ 0)
+Output: α — [B, 1, N, A] for CCE, [B, 1, N, A, A] for CE
 ```
 
 Given duals α, the closed-form primal recovery implements Equation (7) from the paper [1]:
@@ -121,10 +124,10 @@ L_dual = log_sum_exp + ε⁺ · Σ_p Σ_a α_p(a) − ρ · Σ_p ε_p
 | - | ------------------------------------ | ------------------------------------------------ |
 | 1 | Training convergence on `8×8`        | The unsupervised loss works                      |
 | 2 | In-distribution accuracy (`8×8`)     | NES matches iterative solvers                    |
-| 3 | Zero-shot on `2×2`, `4×4`, `8×8`     | Shape-independent generalization                 |
-| 4 | MWME vs. MRE vs. ε variants          | Flexible selection framework                     |
+| 3 | Zero-shot on `2×2`, `4×4`, `8×8`     | Shape-independent generalisation                 |
+| 4 | MWME vs. MRE vs. ε-variants          | Flexible selection framework                     |
 | 5 | CCE vs. CE duals                     | Both solution concepts are learnable             |
-| 6 | 2×2 canonical games                  | Qualitative correctness & polytope visualization |
+| 6 | 2×2 canonical games                  | Qualitative correctness & polytope visualisation |
 
 
 ```Bash

@@ -565,7 +565,7 @@ class AsyncExactSolver:
       vals = [r[key] for r in results if key in r and r[key] is not None]
       if not vals:
         return None
-      return jnp.mean(jnp.stack([jnp.array(v) for v in vals]), axis=0)
+      return float(jnp.mean(jnp.stack([jnp.array(v) for v in vals]), axis=0))
 
     return {
       "solver_gap": _maybe_stack("solver_gap"),

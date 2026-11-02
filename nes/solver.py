@@ -164,7 +164,7 @@ class NESolver:
     weight_decay: float = 1e-7,
     network_train_steps: int = 100,
     log_every: int = -1,
-    save_every: int = -1,
+    eval_every: int = 0,
     gradient_clipping: float | None = None,
     seed: int = 42,
     game_kwargs: dict | None = None,
@@ -287,7 +287,7 @@ class NESolver:
     )
 
     self._checkpointer = None
-    self._save_every = save_every
+    self._eval_every = eval_every
     self._log_every = log_every
     if allow_checkpointing:
       self._checkpointer = ocp.StandardCheckpointer()
@@ -490,7 +490,7 @@ class NESolver:
     eps_cap: float | None = None,
   ) -> dict:
 
-    mode  = mode if mode is not None else self._mode
+    mode = mode if mode is not None else self._mode
     # Fast JAX-computed gap (always available immediately)
     if mode == networks.Mode.CCE:
       regret = jax.vmap(eu.compute_cce_gap)(
@@ -525,7 +525,7 @@ class NESolver:
     exact_stats = self._exact_solver.collect(futures, timeout=30.0)
 
     mean_batch_data = exact_stats
-    mean_batch_data[f"{self._mode.name}_gap"] = regret.mean()
+    mean_batch_data[f"{self._mode.name}_gap"] = float(regret.mean())
     return mean_batch_data
 
   def evaluate(
@@ -544,10 +544,10 @@ class NESolver:
     log = self._logging_callback(
       batch, primals, mode, welfare_coeff, entropy_coeff, eps_max
     )
-    log["eval_loss"] = loss
+    log["eval_loss"] = float(loss)
     for k, v in log.items():
       print(f"\t{k}:\t{v}")
-    print()
+    print("\n")
 
     return log
 
@@ -555,6 +555,8 @@ class NESolver:
     self,
     num_steps: int | None = None,
     batch_size: int | None = None,
+    log_every: int | None = None,
+    eval_every: int | None = None,
     eval_batch_size: int | None = None,
     logging_path: etils.epath.Path | str | None = None,
     run_name: str | None = None,
@@ -564,6 +566,9 @@ class NESolver:
     eval_batch_size = (
       self._eval_batch_size if eval_batch_size is None else eval_batch_size
     )
+    log_every = self._log_every if log_every is None else log_every
+    eval_every = self._eval_every if eval_every is None else eval_every
+
     """Executes the optimisation loop to find the equilibrium.
       Returns the optimal dual variables and the recovered primal policy.
     """
@@ -571,35 +576,39 @@ class NESolver:
     trackio.init(project="NES", name=run_name)
     logger = None
     if logging_path is not None:
-      logger = data_logger.DataLoggerJsonLines(logging_path, "NES_learner", True)
+      logger = data_logger.DataLoggerJsonLines(
+        logging_path if logging_path else "./",
+        "NES_learner" + f"_{run_name}" if run_name is not None else "",
+        True,
+      )
 
     logs = []
 
     network_state = nn.state((self._network, self._optimizer))
 
     # Optimisation Loop
-    for i_seed in range(self._network_train_steps):
-      batch = self._sampler.sample_random(self._batch_size, jax.random.key(i_seed), None)
+    for i_seed in range(num_steps):
+      batch = self._sampler.sample_random(batch_size, jax.random.key(i_seed), None)
 
-      loss_val, (network_state, _) = self._update_fn(network_state, batch)
+      loss, (network_state, _) = self._update_fn(network_state, batch)
       nn.update((self._network, self._optimizer), network_state)
+
+      if log_every > 0 and (self._iteration + 1) % log_every == 0:
+        # Cheap evaluation during training
+        print(f"It. {self._iteration + 1} | Loss {loss}")
+        row = {
+          "step": self._iteration + 1,
+          "loss": float(loss),
+        }
+        if eval_every and (self._iteration + 1) % eval_every == 0:
+          row.update(self.evaluate(self._iteration + 1, eval_batch_size))
+        trackio.log({k: v for k, v in row.items()}, step=self._iteration + 1)
+        if logger is not None:
+          logger.write({k: v for k, v in row.items()})
+        logs.append(row)
 
       self._iteration += 1
 
-      if self._log_every > 0 and self._iteration % self._log_every == 0:
-        # Cheap evaluation during training
-
-        print(f"It. {self._iteration} | Loss {loss_val}")
-
-        log = self.evaluate(self._iteration, self._batch_size)
-        trackio.log({k: v.item() for k, v in log.items()}, step=self._iteration)
-        if logger is not None:
-          logger.write({k: v.item() for k, v in log.items()})
-
-        logs.append(log)
-
-    # Peform expensive evaluation after the training
-    logs.append(self.evaluate(self._iteration, self._eval_batch_size))
     trackio.finish()
 
     return logs

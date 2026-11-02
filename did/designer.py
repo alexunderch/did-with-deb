@@ -316,9 +316,9 @@ class MechanismGeneratorDesigner:
       rng = jax.random.fold_in(self._rng, step)
       weight = jnp.asarray(self._task.weight_schedule(step), jnp.float32)
       loss, aux, state = self._update_fn(state, rng, weight)
+      nn.update((self._generator, self._optimizer), state)
 
-      if log_every and (step + 1) % log_every == 0:
-        nn.update((self._generator, self._optimizer), state)
+      if log_every and (step + 1) % log_every == 0:  
         row = {
           "step": step + 1,
           "loss": float(loss),
@@ -341,7 +341,7 @@ class MechanismGeneratorDesigner:
           logger.write({k: v for k, v in row.items()})
         history.append(row)
         print(row)
-    nn.update((self._generator, self._optimizer), state)
+
     trackio.finish()
     return history
 

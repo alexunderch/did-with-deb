@@ -14,6 +14,8 @@ from nes import (
   equilibria_utils as eu,
   games,
   networks,
+  #TODO: add polytope vis for the existing strategies of the NES
+  polytope_vis,
   samplers,
   solver,
   utils,
@@ -47,7 +49,7 @@ Experiments follow the reproduction plan:
 FLAGS = flags.FLAGS
 
 # Training
-flags.DEFINE_integer("train_steps", 25000, "Training steps for convergence.")
+flags.DEFINE_integer("train_steps", 25_000, "Training steps for convergence.")
 flags.DEFINE_integer("log_every", 2500, "Log/eval frequency.")
 flags.DEFINE_integer("batch_size", 32, "Batch size.")
 flags.DEFINE_integer("eval_batch_size", 64, "Eval batch size.")
@@ -157,7 +159,7 @@ def experiment_1_convergence() -> dict[str, Any]:
     train_steps=FLAGS.train_steps,
   )
 
-  logs = solver.solve(run_name="convergence")
+  logs = solver.solve(run_name="Convergence")
 
   # Extract metrics
   losses = [float(log["eval_loss"]) for log in logs if "eval_loss" in log]
@@ -183,7 +185,7 @@ def experiment_2_indistribution() -> dict[str, Any]:
     train_steps=FLAGS.train_steps,
   )
 
-  solver.solve()
+  solver.solve(run_name="Heldout games")
 
   # Evaluate on fresh held-out batch
   eval_sampler = samplers.RandomGameSampler(
@@ -279,7 +281,7 @@ def experiment_4_objectives() -> dict[str, Any]:
     # Override coeffs to match objective semantics
     solver._mu = mu
     solver._rho = rho
-    _ = solver.solve()
+    _ = solver.solve(run_name=f"mu={mu}_rho={rho}")
 
     # Final eval
     eval_sampler = samplers.RandomGameSampler(
@@ -313,7 +315,7 @@ def experiment_5_modes() -> dict[str, Any]:
       num_strategies=(8, 8),
       train_steps=FLAGS.train_steps,
     )
-    _ = solver.solve()
+    _ = solver.solve(run_name=f"mode={mode}")
 
     eval_sampler = samplers.RandomGameSampler(
       game=games.Game.L2_INVARIANT,
@@ -353,7 +355,7 @@ def experiment_6_canonical() -> dict[str, Any]:
       samplers.Objective.EPS_MWMRE,
       train_steps=FLAGS.train_steps,
     )
-    solver.solve()
+    solver.solve(run_name=f"Game={game_name}")
 
     # Single-game eval
     log = solver.evaluate(0, 1)

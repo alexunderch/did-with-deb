@@ -411,7 +411,7 @@ class MultiGameSampler(GameSampler):
           game=pyspiel.load_game(gc.open_spiel_name), obj=obj, z_m=z_m, m=m
         )
       else:
-        # No good sampler - go next.
+        # No good sampler -- go next.
         continue
 
       if self.num_players is None:
