@@ -14,6 +14,7 @@ import trackio
 from open_spiel.python.utils import data_logger
 
 from nes import equilibria_utils as eu, games, networks, samplers, utils
+from tqdm.auto import tqdm
 
 """Neural Equilibrium Solver implemented in Jax.
 
@@ -415,12 +416,14 @@ class NESolver:
       checkpoint_dir = etils.epath.Path(checkpoint_dir)
     if save_optimiser:
       self._checkpointer.save(
-        checkpoint_dir / "optimiser",
+        (checkpoint_dir / "optimiser").absolute(),
         nn.state((self._network, self._optimizer)),
         force=True,
       )
     else:
-      self._checkpointer.save(checkpoint_dir / "state", nn.state(self._network))
+      self._checkpointer.save(
+        (checkpoint_dir / "state").absolute(), nn.state(self._network)
+      )
     if save_network_config:
       config = {
         "checkpoint_dir": str(checkpoint_dir),
@@ -432,7 +435,7 @@ class NESolver:
         "welfare_coeff": self._mu,
         "entropy_coeff": self._rho,
         "epsilon_max": float(self._eps_cap),
-        "objective": self._objective.name,
+        "objective": self._objective,
         "norm": self._norm,
         "seed": self._seed,
       }
@@ -468,14 +471,14 @@ class NESolver:
 
     if load_optimiser:
       state_restored = self._checkpointer.restore(
-        checkpoint_dir / "optimiser",
+        (checkpoint_dir / "optimiser").absolute(),
         nn.state((self._network, self._optimizer)),
       )
       nn.update((self._network, self._optimizer), state_restored)
 
     else:
       state_restored = self._checkpointer.restore(
-        checkpoint_dir / "state", nn.state(self._network)
+        (checkpoint_dir / "state").absolute(), nn.state(self._network)
       )
       nn.update(self._network, state_restored)
     self._checkpointer.wait_until_finished()
@@ -489,7 +492,6 @@ class NESolver:
     entropy_coeff: float | None = None,
     eps_cap: float | None = None,
   ) -> dict:
-
     mode = mode if mode is not None else self._mode
     # Fast JAX-computed gap (always available immediately)
     if mode == networks.Mode.CCE:
@@ -539,7 +541,9 @@ class NESolver:
     eps_max: float = None,
   ) -> dict:
     sampler = sampler if sampler is not None else self._sampler
-    batch = sampler.sample_random(batch_size, jax.random.key(step), None)
+    batch = sampler.sample_random(
+      batch_size, jax.random.key(step), None, deterministic=True
+    )
     loss, (primals, _) = self._infer_fn(nn.state(self._network), batch)
     log = self._logging_callback(
       batch, primals, mode, welfare_coeff, entropy_coeff, eps_max
@@ -587,20 +591,22 @@ class NESolver:
     network_state = nn.state((self._network, self._optimizer))
 
     # Optimisation Loop
-    for i_seed in range(num_steps):
-      batch = self._sampler.sample_random(batch_size, jax.random.key(i_seed), None)
+    for step in tqdm(range(num_steps), total=num_steps):
+      rng = jax.random.fold_in(self._rngkey, step)
+      batch = self._sampler.sample_random(batch_size, rng, None)
 
       loss, (network_state, _) = self._update_fn(network_state, batch)
       nn.update((self._network, self._optimizer), network_state)
 
-      if log_every > 0 and (self._iteration + 1) % log_every == 0:
+      # log even the first step (just to make sure)
+      if log_every > 0 and (self._iteration + 1) % log_every == 0 or self._iteration == 0:
         # Cheap evaluation during training
         print(f"It. {self._iteration + 1} | Loss {loss}")
         row = {
-          "step": self._iteration + 1,
+          "iteration": self._iteration + 1,
           "loss": float(loss),
         }
-        if eval_every and (self._iteration + 1) % eval_every == 0:
+        if eval_every and (self._iteration + 1) % eval_every == 0 or self._iteration == 0:
           row.update(self.evaluate(self._iteration + 1, eval_batch_size))
         trackio.log({k: v for k, v in row.items()}, step=self._iteration + 1)
         if logger is not None:

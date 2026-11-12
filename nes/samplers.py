@@ -490,12 +490,28 @@ class MultiGameSampler(GameSampler):
     rng: chex.PRNGKey,
     idx: int | None = None,
     strategy_proposal: chex.Array = None,
+    deterministic: bool = False,
   ) -> Data:
-    keys = jax.random.split(rng, batch_size)
-
     if idx is None:
-      idx_rng, _ = jax.random.split(rng)
+      idx_rng, rng = jax.random.split(rng)
       idx = jax.random.choice(idx_rng, len(self._samplers), p=self.sampling_probs)
+
+    if deterministic:
+      num_buckets = len(self._samplers)
+
+
+      return jax.tree.map(lambda *xs: jnp.concatenate(xs, axis=0),
+        *[
+          jax.vmap(
+            functools.partial(
+              self._sample_single_random, idx=_idx, strategy_proposal=strategy_proposal
+            )
+          )(jax.random.split(jax.random.fold_in(rng, _idx), batch_size // num_buckets))
+          for _idx in range(num_buckets)
+        ]
+      )
+
+    keys = jax.random.split(rng, batch_size)
 
     return jax.vmap(
       functools.partial(
