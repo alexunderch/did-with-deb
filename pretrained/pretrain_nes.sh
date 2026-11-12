@@ -7,7 +7,7 @@ for mode in "${modes[@]}"; do
     for ma in "${max_actions[@]}"; do
         python nes_main.py --batch_size=64 \
             --checkpoint_dir="pretrained/${mode}_${ma}" \
-            --eval_batch_size 30 \
+            --eval_batch_size 18 \
             --num_strategies="$ma,$ma" \
             --random_games="L2_INVARIANT,L1_INVARIANT,LINF_INVARIANT" \
             --iterations=50000 \

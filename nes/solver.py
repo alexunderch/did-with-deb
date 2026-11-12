@@ -12,9 +12,9 @@ import orbax.checkpoint as ocp
 import pyspiel
 import trackio
 from open_spiel.python.utils import data_logger
+from tqdm.auto import tqdm
 
 from nes import equilibria_utils as eu, games, networks, samplers, utils
-from tqdm.auto import tqdm
 
 """Neural Equilibrium Solver implemented in Jax.
 
